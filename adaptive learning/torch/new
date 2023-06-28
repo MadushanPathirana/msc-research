@@ -1,0 +1,74 @@
+    def getDownloadTrends(self, searchConnection, articleDoi,asOfYear):
+        esIndex = ["wji_fact_download_doi_cubed_gr_1"]
+        articleDoiQ=Q("term", **{"ARTICLE_DOI": articleDoi})
+        if asOfYear==None:
+            matchQ = articleDoiQ
+        else:
+            yearQ= Q("term", **{"ASOFYEARS": asOfYear})
+            matchQ =Q('bool',must=[articleDoiQ,yearQ])
+
+        srch = Search(using=searchConnection, index=esIndex).query(matchQ).source(['ASOFYEARS','ASOFMONTHS','COUNT']).extra(size=5000)
+        #srch.aggs.bucket()
+
+        logging.debug(srch.to_dict())
+        resp=srch.execute()
+
+        hits= resp.hits.total.value
+        if hits>0:
+            responses=resp.hits.hits
+
+            downloadCountByYearDict={}
+            downloadCountByYearDictList=[]
+            logging.debug(responses)
+            for num,doc in enumerate( responses):
+               year= doc._source.ASOFYEARS
+               month=doc._source.ASOFMONTHS
+               downloads=int(doc._source.COUNT)
+               logging.debug((year,downloads))
+
+               if month<10:
+                   month='0'+str(month)
+               yearMonth=str(year)+'-'+str(month)
+               if year not in downloadCountByYearDict.keys():
+                   downloadCountByYearDict[yearMonth] =  downloads
+               else:
+                   downloadCountByYearDict[yearMonth]=downloadCountByYearDict[yearMonth]+downloads
+
+            for item in downloadCountByYearDict.items():
+                downloadCountByYearDictList.append({'year_month':item[0],'downloads':item[1]})
+
+            return {'hits':hits,'response':downloadCountByYearDictList}
+        else:
+            return {'hits':hits,'response':{}}
+
+    def getMostDownloadArticles(self, searchConnection,asOfYear):
+        esIndex = ["wji_fact_download_doi_cubed_gr_1"]
+        fillterAll = Q("term", **{'ARTICLE_DOI': 'ALL'})
+        if asOfYear != None:
+            yearQ=Q("term", **{"ASOFYEARS": asOfYear})
+
+
+            matchQ =Q('bool',must=[yearQ],must_not=[fillterAll])
+        else:
+
+
+            matchQ = Q('bool',  must_not=[fillterAll])
+
+        srch = Search(using=searchConnection, index=esIndex).query(matchQ).extra(size=0)
+        srch.aggs.bucket("ASOFYEARS", "terms", field="ARTICLE_DOI",size=10,  order={"download_count": "desc"}).metric("download_count", "sum", field="count")
+        #srch.aggs.bucket()
+
+        logging.debug(srch.to_dict())
+        resp=srch.execute()
+
+        hits= resp.hits.total.value
+        if hits>0:
+            responses=resp.aggregations
+            logging.debug(responses)
+
+
+            downloadCountByYearDictList=[]
+
+            return responses
+        else:
+            return {'hits':hits,'response':{}}
